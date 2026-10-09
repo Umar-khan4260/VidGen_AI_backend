@@ -1,0 +1,26 @@
+﻿rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── users collection ────────────────────────────────────
+    match /users/{userId} {
+      // Allow read ONLY if the user's secure Firebase Auth UID is in the linked array
+      allow read: if request.auth != null && request.auth.uid in resource.data.linkedFirebaseUids;
+      
+      // No direct writes from the app — all writes go through Cloud Functions
+      allow write: if false;
+
+      // Transaction sub-collection: app can read its own history
+      match /transactions/{txId} {
+        allow read: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/users/$(userId)).data.linkedFirebaseUids;
+        allow write: if false;
+      }
+    }
+
+    // ── admin collection ─────────────────────────────────────
+    match /admin/{document} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}
