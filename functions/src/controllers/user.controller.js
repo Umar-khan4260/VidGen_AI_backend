@@ -2,9 +2,8 @@
 const userService = require('../services/user.service');
 
 const identifyUserHandler = async (request) => {
-  const { sharedCloudId, platform } = request.data;
+  const { sharedCloudId, platform, migratedCredits } = request.data;
   
-  // Security: Ensure the request comes from an authenticated Firebase user
   if (!request.auth || !request.auth.uid) {
     throw new HttpsError('unauthenticated', 'You must be authenticated to call this function.');
   }
@@ -17,30 +16,29 @@ const identifyUserHandler = async (request) => {
   let userDoc = await userService.getUser(sharedCloudId);
 
   if (!userDoc) {
-    // ── NEW USER: read free credit amount from admin config ──
     const config = await userService.getAdminConfig();
     const freeCredits = config.freeCreditsOnSignup || 80;
+    
+    // Pass migrated credits from client on first launch
+    const creditsToUse = migratedCredits && migratedCredits > 0 ? migratedCredits : freeCredits;
 
-    await userService.createUser(sharedCloudId, platform, freeCredits, firebaseUid);
-    console.log(`New user registered: ${sharedCloudId} on ${platform}`);
+    await userService.createUser(sharedCloudId, platform, freeCredits, firebaseUid, migratedCredits);
+    console.log(`New user registered: ${sharedCloudId} on ${platform} with ${creditsToUse} credits`);
 
     return {
       isNewUser: true,
       isBlocked: false,
-      credits: freeCredits,
+      credits: creditsToUse,
       subscriptionTier: 'free',
       subscriptionEndDate: null,
     };
   }
 
-  // ── EXISTING USER: update last active & link Firebase device UID ──
   await userService.updateLastActiveAndLinkDevice(sharedCloudId, firebaseUid);
   let data = userDoc.data();
 
-  // Auto-expire subscription if past end date
   data = await userService.expireSubscriptionIfNeeded(sharedCloudId, data);
 
-  // Check maintenance mode
   const config = await userService.getAdminConfig();
   const maintenanceMode = config.maintenanceMode === true;
   if (maintenanceMode && !(data.isAdmin === true)) {
