@@ -6,16 +6,18 @@ class UserService {
     return userDoc.exists ? userDoc : null;
   }
 
-  async createUser(userId, platform, freeCredits, firebaseUid) {
+  async createUser(userId, platform, freeCredits, firebaseUid, migratedCredits) {
+    const initialCredits = migratedCredits > 0 ? migratedCredits : freeCredits;
+    
     const newUser = {
-      cloudKitUserId: userId,
+      sharedUserId: userId,
       linkedFirebaseUids: [firebaseUid], // Security link
       createdAt: FieldValue.serverTimestamp(),
       lastActiveAt: FieldValue.serverTimestamp(),
       isBlocked: false,
       blockReason: null,
       subscriptionTier: 'free',
-      credits: freeCredits,
+      credits: initialCredits,
       subscriptionEndDate: null,
       transactionId: null,
       totalGenerations: 0,
