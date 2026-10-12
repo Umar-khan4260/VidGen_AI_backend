@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "vidgen-ai-functions",
   "description": "VidGen AI Firebase Cloud Functions",
   "scripts": {
@@ -14,9 +14,10 @@
   },
   "main": "index.js",
   "dependencies": {
+    "axios": "^1.7.2",
+    "express": "^5.3.0",
     "firebase-admin": "^13.4.0",
-    "firebase-functions": "^6.4.0",
-    "axios": "^1.7.2"
+    "firebase-functions": "^6.4.0"
   },
   "devDependencies": {
     "eslint": "^8.15.0",
