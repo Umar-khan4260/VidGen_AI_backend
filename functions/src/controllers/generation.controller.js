@@ -64,4 +64,25 @@ const getStatusCode = (code) => {
   }
 };
 
-module.exports = { generateContent, getTaskStatus };
+const getDownloadUrl = async (req, res) => {
+  try {
+    const { url } = req.body;
+    const userId = req.auth.uid;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (!url) {
+      return res.status(400).json({ error: 'url is required' });
+    }
+
+    const service = initService(req.app.locals.kieApiKey);
+    const result = await service.getDownloadUrl(url);
+    return res.json(result);
+  } catch (error) {
+    const statusCode = getStatusCode(error.code);
+    return res.status(statusCode).json({ error: error.message, code: error.code });
+  }
+};
+
+module.exports = { generateContent, getTaskStatus, getDownloadUrl };

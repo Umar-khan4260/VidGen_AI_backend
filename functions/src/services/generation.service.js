@@ -2,6 +2,7 @@ const axios = require('axios');
 const { db, FieldValue } = require('../config/firebase');
 
 const KIE_BASE_URL = 'https://api.kie.ai';
+const KIE_DOWNLOAD_URL_PATH = '/api/v1/common/download-url';
 
 const ALLOWED_ENDPOINTS = [
   '/api/v1/jobs/createTask',
@@ -172,6 +173,31 @@ class GenerationService {
 
     const data = await this.callKieStatusApi(statusEndpoint, taskId);
     return { success: true, data };
+  }
+
+  /**
+   * Resolve a direct download URL for a generated file. Proxied so the KIE key
+   * stays server-side.
+   */
+  async getDownloadUrl(fileUrl) {
+    try {
+      const response = await axios.post(
+        `${KIE_BASE_URL}${KIE_DOWNLOAD_URL_PATH}`,
+        { url: fileUrl },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.kieApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 30000,
+        }
+      );
+      return { success: true, data: response.data };
+    } catch (apiError) {
+      const status = apiError.response?.status;
+      const msg = apiError.response?.data?.msg || apiError.message;
+      throw new Error(`KIE download-url error (${status}): ${msg}`);
+    }
   }
 }
 
