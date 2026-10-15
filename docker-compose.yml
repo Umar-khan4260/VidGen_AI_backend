@@ -1,0 +1,25 @@
+﻿# VidGen AI backend — local/Docker stack
+# NOTE: the top-level `version:` key is obsolete in Docker Compose v2 and is omitted.
+
+services:
+  app:
+    build:
+      context: .          # Build context is the root so the Dockerfile can COPY functions/
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    # Load KIE_API_KEY (and anything else) from backend/.env at runtime.
+    # `required: false` keeps the stack startable before .env is created.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      # Overrides the host path that may live in .env; inside the container the
+      # service-account key is mounted at this path below.
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account-key.json
+    volumes:
+      - ./functions/src:/app/src                              # hot-reload src in dev
+      - ./service-account-key.json:/app/service-account-key.json:ro  # Firebase Admin creds (read-only)
+      - /app/node_modules                                     # keep container node_modules untouched

@@ -1,0 +1,19 @@
+﻿# Ignore node_modules at all levels — Docker will install fresh
+node_modules
+functions/node_modules
+
+# Ignore Firebase-specific files not needed in Docker
+.firebaserc
+firebase.json
+firestore.rules
+firestore.indexes.json
+service-account-key.json
+functions/.eslintrc.js
+
+# Ignore git and logs
+.git
+*.log
+
+# Ignore environment files
+.env
+*.env.local

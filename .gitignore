@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+functions/node_modules/
+
+# Environment variables / secrets — NEVER commit these
+.env
+.env.*
+!.env.example
+*.local
+service-account-key.json
+service-account-key*.json
+*-service-account*.json
+
+# Firebase
+.firebase/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
