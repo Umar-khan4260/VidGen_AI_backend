@@ -2,7 +2,7 @@
 
 const identifyUser = async (req, res) => {
   try {
-    const { sharedCloudId, platform, migratedCredits } = req.body;
+    const { sharedCloudId, platform } = req.body;
     const firebaseUid = req.auth.uid;
 
     if (!firebaseUid) {
@@ -16,18 +16,18 @@ const identifyUser = async (req, res) => {
     let userDoc = await userService.getUser(sharedCloudId);
 
     if (!userDoc) {
-      const config = await userService.getAdminConfig();
-      const freeCredits = config.freeCreditsOnSignup || 80;
-
-      const creditsToUse = migratedCredits && migratedCredits > 0 ? migratedCredits : freeCredits;
-
-      await userService.createUser(sharedCloudId, platform, freeCredits, firebaseUid, migratedCredits);
-      console.log(`New user registered: ${sharedCloudId} on ${platform} with ${creditsToUse} credits`);
+      // No free credits on signup — new accounts start at 0 and must
+      // purchase credits before generating anything. (The old free-80
+      // default and the client-claimed "migrated credits" were both free
+      // credit vectors: with anonymous auth, a fresh install could claim
+      // them at will.)
+      await userService.createUser(sharedCloudId, platform, firebaseUid);
+      console.log(`New user registered: ${sharedCloudId} on ${platform} with 0 credits`);
 
       return res.json({
         isNewUser: true,
         isBlocked: false,
-        credits: creditsToUse,
+        credits: 0,
         subscriptionTier: 'free',
         subscriptionEndDate: null,
       });

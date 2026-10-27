@@ -1,9 +1,11 @@
 const express = require('express');
 const multer = require('multer');
 const { verifyFirebaseAuth } = require('../middleware/auth');
+const rateLimit = require('../middleware/rateLimit');
 const userController = require('../controllers/user.controller');
 const generationController = require('../controllers/generation.controller');
 const chatController = require('../controllers/chat.controller');
+const purchaseController = require('../controllers/purchase.controller');
 
 const router = express.Router();
 
@@ -15,7 +17,9 @@ const upload = multer({
   limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024 },
 });
 
-router.post('/identifyUser', verifyFirebaseAuth, userController.identifyUser);
+// identifyUser links a Firebase uid to an account document — rate-limit it so
+// the link step cannot be brute-forced.
+router.post('/identifyUser', verifyFirebaseAuth, rateLimit({ max: 10, windowMs: 60 * 1000 }), userController.identifyUser);
 router.post('/generateContent', verifyFirebaseAuth, generationController.generateContent);
 router.post('/getTaskStatus', verifyFirebaseAuth, generationController.getTaskStatus);
 router.post('/getDownloadUrl', verifyFirebaseAuth, generationController.getDownloadUrl);
@@ -24,5 +28,8 @@ router.post('/getDownloadUrl', verifyFirebaseAuth, generationController.getDownl
 router.post('/chatCompletion', verifyFirebaseAuth, chatController.chatCompletion);
 router.post('/chatStream', verifyFirebaseAuth, chatController.chatStream);
 router.post('/upload', verifyFirebaseAuth, upload.single('file'), chatController.uploadFile);
+
+// Purchases — credits App Store transactions to the Firestore balance.
+router.post('/activatePurchase', verifyFirebaseAuth, purchaseController.activatePurchase);
 
 module.exports = router;

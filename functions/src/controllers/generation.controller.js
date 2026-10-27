@@ -11,7 +11,10 @@ const initService = (kieApiKey) => {
 
 const generateContent = async (req, res) => {
   try {
-    const { endpoint, payload, creditCost, model } = req.body;
+    // NOTE: `creditCost` from the client is intentionally NOT read here.
+    // Pricing lives server-side (pricing.service.js) so a modified client
+    // cannot generate for free.
+    const { endpoint, payload, model } = req.body;
     const userId = req.auth.uid;
 
     if (!userId) {
@@ -20,12 +23,12 @@ const generateContent = async (req, res) => {
     if (!endpoint) {
       return res.status(400).json({ error: 'endpoint is required' });
     }
-    if (!creditCost || creditCost <= 0) {
-      return res.status(400).json({ error: 'creditCost must be a positive number' });
+    if (!model || typeof model !== 'string') {
+      return res.status(400).json({ error: 'model is required' });
     }
 
     const service = initService(req.app.locals.kieApiKey);
-    const result = await service.generateContent(userId, endpoint, payload, creditCost, model);
+    const result = await service.generateContent(userId, endpoint, payload, model);
     return res.json(result);
   } catch (error) {
     const statusCode = getStatusCode(error.code);
