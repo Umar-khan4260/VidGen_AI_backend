@@ -15,7 +15,7 @@ app.use((req, res, next) => {
 app.use('/api', routes);
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok, health route is working' });
 });
 
 // Return clean JSON for errors thrown before/outside controllers (e.g. multer

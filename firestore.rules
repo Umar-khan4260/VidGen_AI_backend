@@ -1,4 +1,4 @@
-﻿rules_version = '2';
+rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -9,6 +9,16 @@ service cloud.firestore {
       match /transactions/{txId} {
         allow read: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/users/$(userId)).data.linkedFirebaseUids;
         allow write: if false;
+      }
+
+      // Task ownership + refund bookkeeping (server-written only).
+      match /tasks/{taskId} {
+        allow read, write: if false;
+      }
+
+      // App Store purchase ledger, keyed by transactionId (server-written only).
+      match /purchases/{purchaseId} {
+        allow read, write: if false;
       }
     }
 

@@ -1,4 +1,19 @@
-﻿{
-  "indexes": [],
+{
+  "indexes": [
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "settled",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
   "fieldOverrides": []
 }
