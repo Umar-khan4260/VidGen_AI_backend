@@ -100,10 +100,11 @@ const activatePurchase = async (req, res) => {
 
       const userSnap = await t.get(userRef);
       const current = Number(userSnap.data()?.credits) || 0;
-      newBalance = current + product.credits;
+      // Plan credits set the balance directly to the plan amount rather than adding on top
+      newBalance = product.credits;
 
       const tierUpdate = {
-        credits: FieldValue.increment(product.credits),
+        credits: product.credits,
         lastActiveAt: FieldValue.serverTimestamp(),
       };
       if (product.tier === 'lifetime') {
