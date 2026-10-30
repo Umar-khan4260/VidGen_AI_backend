@@ -1,19 +1,22 @@
-﻿# Ignore node_modules at all levels — Docker will install fresh
-node_modules
-functions/node_modules
+﻿# Keep the image clean: never copy local deps, secrets or VCS data.
+# Paths are relative to the build context (the backend repo root).
 
-# Ignore Firebase-specific files not needed in Docker
-.firebaserc
+# Local dependencies (host node_modules are Windows-native — must NOT ship)
+functions/node_modules
+**/node_modules
+
+# Secrets
+.env
+.env.*
+service-account-key.json
+
+# VCS / editor / docs
+.git
+.gitignore
+.vscode
+*.md
+
+# Firebase config (not needed at runtime inside the image)
 firebase.json
 firestore.rules
 firestore.indexes.json
-service-account-key.json
-functions/.eslintrc.js
-
-# Ignore git and logs
-.git
-*.log
-
-# Ignore environment files
-.env
-*.env.local

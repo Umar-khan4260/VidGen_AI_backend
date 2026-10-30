@@ -1,0 +1,49 @@
+# VidGen AI backend — nginx reverse proxy (VPS deployment)
+#
+# 1. Copy to /etc/nginx/sites-available/vidgen and EDIT server_name
+# 2. ln -s /etc/nginx/sites-available/vidgen /etc/nginx/sites-enabled/
+# 3. nginx -t && systemctl reload nginx
+# 4. certbot --nginx -d api.yourdomain.com   (installs Let's Encrypt SSL)
+#
+# After certbot runs, re-check this file — certbot edits it to add the
+# ssl_certificate lines for you.
+
+server {
+    listen 80;
+    server_name api.yourdomain.com;   # <-- EDIT: your domain
+    # certbot will replace this block with a redirect to https
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+    }
+}
+
+# --- certbot adds the 443 server block below automatically. ---
+# --- Reference shape (do not enable before certs exist):    ---
+#
+# server {
+#     listen 443 ssl http2;
+#     server_name api.yourdomain.com;
+#
+#     ssl_certificate     /etc/letsencrypt/live/api.yourdomain.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/api.yourdomain.com/privkey.pem;
+#
+#     # Backend accepts uploads up to 200MB (MAX_UPLOAD_MB)
+#     client_max_body_size 210m;
+#
+#     location / {
+#         proxy_pass http://127.0.0.1:8080;
+#         proxy_http_version 1.1;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#
+#         # Chat streaming is SSE — buffering must stay off
+#         proxy_buffering off;
+#         proxy_cache off;
+#
+#         # Long generations + slow KIE uploads take many minutes
+#         proxy_read_timeout 3600s;
+#         proxy_send_timeout 3600s;
+#     }
+# }

@@ -8,6 +8,7 @@ const verifyFirebaseAuth = async (req, res, next) => {
   }
 
   const token = authHeader.split('Bearer ')[1];
+  // console.log('Verifying Firebase token:', token); // Log the token for debugging
 
   try {
     const decodedToken = await getAuth().verifyIdToken(token);

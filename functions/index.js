@@ -5,7 +5,7 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret } = require('firebase-functions/params');
 const app = require('./src/app');
 const GenerationService = require('./src/services/generation.service');
-const { getFirestore } = require('firebase-admin/firestore');
+const { runSettlementPass } = require('./src/services/task.settler');
 
 const kieApiKey = defineSecret('KIE_API_KEY');
 
@@ -26,10 +26,10 @@ exports.api = onRequest(
 
 /**
  * Task settler — bills generation credits even when the client never polls
- * (app crashed / closed after createTask). Every 10 minutes it picks up
- * unsettled tasks older than 10 minutes, fetches their recordInfo and
- * settles the exact creditsConsumed (0 for failures, flat fallback when KIE
- * reports none). See generation.service.js settleTask.
+ * (app crashed / closed after createTask). Firebase-hosted scheduler; the
+ * VPS/Docker deployment uses node-cron in src/cron/settle.cron.js with the
+ * same shared pass (task.settler.js) — running both at once is safe because
+ * settlement is exactly-once per task.
  */
 exports.settleTasks = onSchedule(
   {
@@ -38,31 +38,8 @@ exports.settleTasks = onSchedule(
     timeoutSeconds: 540,
   },
   async () => {
-    const db = getFirestore();
     const service = new GenerationService(kieApiKey.value());
-
-    // Only tasks older than 10 minutes — anything fresher is still being
-    // polled live by the client.
-    const cutoffDate = new Date(Date.now() - 10 * 60 * 1000);
-
-    const pending = await db.collectionGroup('tasks')
-      .where('settled', '==', false)
-      .where('createdAt', '<', cutoffDate)
-      .limit(100)
-      .get();
-
-    if (pending.empty) return null;
-
-    console.log(`[settler] Settling ${pending.size} pending task(s)...`);
-    for (const taskDoc of pending.docs) {
-      try {
-        await service.settlePendingTask(taskDoc);
-      } catch (e) {
-        // Individual failures (e.g. recordInfo 404 for a KIE-side purge) must
-        // not stop the rest of the batch.
-        console.error(`[settler] Failed to settle ${taskDoc.ref.path}:`, e.message);
-      }
-    }
+    await runSettlementPass(service);
     return null;
   }
 );
