@@ -6,7 +6,7 @@ class UserService {
     return userDoc.exists ? userDoc : null;
   }
 
-  async createUser(userId, platform, firebaseUid) {
+  async createUser(userId, platform, firebaseUid, initialCredits = 0) {
     const newUser = {
       sharedUserId: userId,
       linkedFirebaseUids: [firebaseUid], // Security link
@@ -15,7 +15,7 @@ class UserService {
       isBlocked: false,
       blockReason: null,
       subscriptionTier: 'free',
-      credits: 0, // No free credits — users must purchase before generating
+      credits: Number(initialCredits) || 0, // Dynamic free credits set by admin config
       subscriptionEndDate: null,
       transactionId: null,
       totalGenerations: 0,
@@ -23,6 +23,16 @@ class UserService {
     };
 
     await db.collection('users').doc(userId).set(newUser);
+
+    if (initialCredits > 0) {
+      await db.collection('users').doc(userId).collection('transactions').doc().set({
+        amount: initialCredits,
+        type: 'signup_bonus',
+        description: 'Welcome bonus free credits',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
+
     return newUser;
   }
 

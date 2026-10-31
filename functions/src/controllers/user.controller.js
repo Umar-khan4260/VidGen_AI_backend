@@ -14,20 +14,24 @@ const identifyUser = async (req, res) => {
     }
 
     let userDoc = await userService.getUser(sharedCloudId);
+    const config = await userService.getAdminConfig();
+    const maintenanceMode = config.maintenanceMode === true;
 
     if (!userDoc) {
-      // No free credits on signup — new accounts start at 0 and must
-      // purchase credits before generating anything. (The old free-80
-      // default and the client-claimed "migrated credits" were both free
-      // credit vectors: with anonymous auth, a fresh install could claim
-      // them at will.)
-      await userService.createUser(sharedCloudId, platform, firebaseUid);
-      console.log(`New user registered: ${sharedCloudId} on ${platform} with 0 credits`);
+      if (maintenanceMode) {
+        return res.status(503).json({ error: 'The app is currently under maintenance. Please try again later.' });
+      }
+
+      // Read admin-configured default free credits (defaults to 0 if not set in admin/config)
+      const initialCredits = Number(config.defaultCredits ?? config.freeCredits ?? 0) || 0;
+
+      await userService.createUser(sharedCloudId, platform, firebaseUid, initialCredits);
+      console.log(`New user registered: ${sharedCloudId} on ${platform} with ${initialCredits} credits`);
 
       return res.json({
         isNewUser: true,
         isBlocked: false,
-        credits: 0,
+        credits: initialCredits,
         subscriptionTier: 'free',
         subscriptionEndDate: null,
       });
@@ -38,8 +42,6 @@ const identifyUser = async (req, res) => {
 
     data = await userService.expireSubscriptionIfNeeded(sharedCloudId, data);
 
-    const config = await userService.getAdminConfig();
-    const maintenanceMode = config.maintenanceMode === true;
     if (maintenanceMode && !(data.isAdmin === true)) {
       return res.status(503).json({ error: 'The app is currently under maintenance. Please try again later.' });
     }
