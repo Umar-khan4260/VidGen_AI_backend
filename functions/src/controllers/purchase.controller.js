@@ -6,9 +6,9 @@ const userService = require('../services/user.service');
 /** Product ids must exactly match App Store Connect (see
  * subscription_models.dart). Credits per product mirror SubscriptionTier.credits. */
 const PRODUCTS = {
-  'com.mira.aiapp.aigenerator.subscription.weekly': { tier: 'weekly', credits: 500, days: 7 },
-  'com.mira.aiapp.aigenerator.subscription.monthly': { tier: 'monthly', credits: 2000, days: 30 },
-  'com.mira.aiapp.aigenerator.credits.pack.7500': { tier: 'lifetime', credits: 7500, days: null },
+  'com.vidgen.subscription.weekly': { tier: 'weekly', credits: 500, days: 7 },
+  'com.vidgen.subscription.monthly': { tier: 'monthly', credits: 2000, days: 30 },
+  'com.vidgen.credits.pack.7500': { tier: 'lifetime', credits: 7500, days: null },
 };
 
 /**
