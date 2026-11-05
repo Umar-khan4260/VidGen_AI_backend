@@ -6,7 +6,8 @@ const https = require('https');
 const jwt = require('jsonwebtoken');
 
 /** Product ids must exactly match App Store Connect (see
- * subscription_models.dart). Credits per product mirror SubscriptionTier.credits. */
+ * subscription_models.dart). Credits per product mirror SubscriptionTier.credits.
+ */
 const PRODUCTS = {
   'com.vidgen.subscription.weekly':  { tier: 'weekly',   credits: 500,  days: 7    },
   'com.vidgen.subscription.monthly': { tier: 'monthly',  credits: 2000, days: 30   },
@@ -49,7 +50,7 @@ function _buildAppleJWT() {
   const payload = {
     iss: issuerId,
     iat: now,
-    exp: now + 60,                   // 60-second window — enough for one request
+    exp: now + 300,                  // 5 minutes — covers retries without clock-skew risk
     aud: 'appstoreconnect-v1',
     bid: process.env.APPLE_BUNDLE_ID,
   };
@@ -68,7 +69,9 @@ function _appleGet(host, transactionId, appleJWT) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: host,
-      path:     `/inApps/v2/transactions/${encodeURIComponent(transactionId)}`,
+      // NOTE: the App Store Server API path is v1 — there is no /inApps/v2/
+      // transactions endpoint; v2 here would 404 on every lookup.
+      path:     `/inApps/v1/transactions/${encodeURIComponent(transactionId)}`,
       method:   'GET',
       headers: {
         'Authorization': `Bearer ${appleJWT}`,
@@ -123,13 +126,26 @@ async function verifyWithAppStore(transactionId, expectedProductId) {
     return { verified: false, reason: `jwt-build-failed: ${err.message}` };
   }
 
-  // 1️⃣  Try production first
-  let result = await _appleGet(APPLE_PROD_HOST, transactionId, appleJWT);
+  // 1️⃣  Try production first. Network failures fail closed with a clean
+  // reason (so ALLOW_UNVERIFIED_PURCHASES=false rejects instead of 500ing).
+  let result;
+  try {
+    result = await _appleGet(APPLE_PROD_HOST, transactionId, appleJWT);
+  } catch (err) {
+    console.error('[purchase] Apple production request failed:', err.message);
+    return { verified: false, reason: 'apple-api-error' };
+  }
 
-  // 2️⃣  If Apple says the receipt is from sandbox, retry on sandbox endpoint
-  if (result.statusCode === 200 && result.body.errorCode === 4290001) {
-    console.info('[purchase] Transaction is sandbox — retrying on sandbox endpoint.');
-    result = await _appleGet(APPLE_SBX_HOST, transactionId, appleJWT);
+  // 2️⃣  A transaction that only exists in the sandbox (TestFlight / sandbox
+  // testers) comes back as HTTP 404 from production — retry there.
+  if (result.statusCode === 404) {
+    console.info('[purchase] Not in production — retrying on sandbox endpoint.');
+    try {
+      result = await _appleGet(APPLE_SBX_HOST, transactionId, appleJWT);
+    } catch (err) {
+      console.error('[purchase] Apple sandbox request failed:', err.message);
+      return { verified: false, reason: 'apple-api-error' };
+    }
   }
 
   if (result.statusCode !== 200) {
@@ -158,6 +174,7 @@ async function verifyWithAppStore(transactionId, expectedProductId) {
 
   const appleProductId = txClaims.productId;
   const appleBundleId  = txClaims.bundleId;
+  const appleTxId      = txClaims.transactionId;
   const environment    = txClaims.environment ?? 'Production'; // 'Sandbox' | 'Production'
 
   // Cross-check bundle ID
@@ -170,6 +187,19 @@ async function verifyWithAppStore(transactionId, expectedProductId) {
   if (appleProductId !== expectedProductId) {
     console.warn(`[purchase] Product ID mismatch: Apple="${appleProductId}" app="${expectedProductId}"`);
     return { verified: false, reason: 'product-id-mismatch' };
+  }
+
+  // Cross-check transaction ID — the response must be for the transaction
+  // the client claimed, not just any transaction from this app.
+  if (appleTxId && String(appleTxId) !== String(transactionId)) {
+    console.warn(`[purchase] Transaction ID mismatch: Apple="${appleTxId}" claimed="${transactionId}"`);
+    return { verified: false, reason: 'transaction-id-mismatch' };
+  }
+
+  // Refunded / revoked by Apple (customer-support refunds) — never grant.
+  if (txClaims.revocationDate || txClaims.revocationReason != null) {
+    console.warn(`[purchase] Transaction ${transactionId} was revoked by Apple — refusing grant.`);
+    return { verified: false, reason: 'transaction-revoked' };
   }
 
   console.info(`[purchase] ✓ Apple verified tx=${transactionId} product=${appleProductId} env=${environment}`);
@@ -254,11 +284,16 @@ const activatePurchase = async (req, res) => {
       const freshPurchase = await t.get(purchaseRef);
       if (freshPurchase.exists) { newBalance = null; return; }
 
-      // Credits are set directly to the plan amount (not stacked on existing balance).
-      newBalance = product.credits;
+      // Credits ADD to the existing balance — a user with leftover credits
+      // must never lose them by buying a plan, and repeat lifetime-pack
+      // purchases stack. Idempotency (one grant per transactionId) is what
+      // prevents double-granting, not overwriting the balance.
+      const freshUser = await t.get(userRef);
+      const currentCredits = Number(freshUser.data()?.credits) || 0;
+      newBalance = currentCredits + product.credits;
 
       const tierUpdate = {
-        credits:      product.credits,
+        credits:      FieldValue.increment(product.credits),
         lastActiveAt: FieldValue.serverTimestamp(),
       };
 
