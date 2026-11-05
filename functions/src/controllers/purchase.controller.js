@@ -2,8 +2,6 @@
 
 const { db, FieldValue } = require('../config/firebase');
 const userService = require('../services/user.service');
-const https = require('https');
-const jwt = require('jsonwebtoken');
 
 /** Product ids must exactly match App Store Connect (see
  * subscription_models.dart). Credits per product mirror SubscriptionTier.credits.
@@ -14,202 +12,6 @@ const PRODUCTS = {
   'com.vidgen.credits.pack.7500':    { tier: 'lifetime', credits: 7500, days: null },
 };
 
-// ---------------------------------------------------------------------------
-// Apple App Store Server API v2 — Transaction verification
-// ---------------------------------------------------------------------------
-// Required environment variables (set in .env or Firebase Functions config):
-//   APPLE_ISSUER_ID   — Issuer ID (App Store Connect → Users & Access → Keys)
-//   APPLE_KEY_ID      — Key ID of your App Store Connect API key (.p8 file)
-//   APPLE_PRIVATE_KEY — Full PEM content of the .p8 key (ES256). Literal \n
-//                       must be used for newlines in the env value, e.g.:
-//                       "-----BEGIN PRIVATE KEY-----\nABC...\n-----END PRIVATE KEY-----"
-//   APPLE_BUNDLE_ID   — Your app bundle ID: com.vidgen
-//
-// Verification strategy:
-//   • Try production endpoint first.
-//   • If Apple returns errorCode 4290001 (transaction not in production),
-//     retry automatically against the sandbox endpoint.
-
-const APPLE_PROD_HOST = 'api.storekit.itunes.apple.com';
-const APPLE_SBX_HOST  = 'api.storekit-sandbox.itunes.apple.com';
-
-/**
- * Build a signed ES256 JWT for the App Store Server API.
- * Apple expects this in the Authorization header as a Bearer token.
- */
-function _buildAppleJWT() {
-  const issuerId   = process.env.APPLE_ISSUER_ID;
-  const keyId      = process.env.APPLE_KEY_ID;
-  const privateKey = (process.env.APPLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
-
-  if (!issuerId || !keyId || !privateKey) {
-    throw new Error('Apple App Store Server API credentials are not fully configured.');
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    iss: issuerId,
-    iat: now,
-    exp: now + 300,                  // 5 minutes — covers retries without clock-skew risk
-    aud: 'appstoreconnect-v1',
-    bid: process.env.APPLE_BUNDLE_ID,
-  };
-
-  return jwt.sign(payload, privateKey, {
-    algorithm: 'ES256',
-    header: { alg: 'ES256', kid: keyId, typ: 'JWT' },
-  });
-}
-
-/**
- * GET /inApps/v2/transactions/{transactionId} from one Apple host.
- * Returns { statusCode, body } where body is parsed JSON.
- */
-function _appleGet(host, transactionId, appleJWT) {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: host,
-      // NOTE: the App Store Server API path is v1 — there is no /inApps/v2/
-      // transactions endpoint; v2 here would 404 on every lookup.
-      path:     `/inApps/v1/transactions/${encodeURIComponent(transactionId)}`,
-      method:   'GET',
-      headers: {
-        'Authorization': `Bearer ${appleJWT}`,
-        'Accept':        'application/json',
-      },
-    };
-
-    const req = https.request(options, (res) => {
-      let body = '';
-      res.on('data', (chunk) => { body += chunk; });
-      res.on('end', () => {
-        try { resolve({ statusCode: res.statusCode, body: JSON.parse(body) }); }
-        catch { resolve({ statusCode: res.statusCode, body: {} }); }
-      });
-    });
-
-    req.on('error', reject);
-    req.setTimeout(15000, () => req.destroy(new Error('Apple API request timed out')));
-    req.end();
-  });
-}
-
-/**
- * Verify a transactionId with the Apple App Store Server API v2.
- *
- * Returns:
- *   { verified: true,  environment, productId, bundleId }  — success
- *   { verified: false, reason }                             — failure / not configured
- *
- * The signed JWS transaction payload is decoded (not signature-verified on
- * our side) — Apple issued it over HTTPS with our private API key, so we
- * trust it. We do cross-check productId and bundleId against expectations.
- */
-async function verifyWithAppStore(transactionId, expectedProductId) {
-  const configured = Boolean(
-    process.env.APPLE_ISSUER_ID  &&
-    process.env.APPLE_KEY_ID     &&
-    process.env.APPLE_PRIVATE_KEY &&
-    process.env.APPLE_BUNDLE_ID
-  );
-
-  if (!configured) {
-    return { verified: false, reason: 'app-store-credentials-not-configured' };
-  }
-
-  // Build JWT — fail fast if key is malformed
-  let appleJWT;
-  try {
-    appleJWT = _buildAppleJWT();
-  } catch (err) {
-    console.error('[purchase] Failed to build Apple JWT:', err.message);
-    return { verified: false, reason: `jwt-build-failed: ${err.message}` };
-  }
-
-  // 1️⃣  Try production first. Network failures fail closed with a clean
-  // reason (so ALLOW_UNVERIFIED_PURCHASES=false rejects instead of 500ing).
-  let result;
-  try {
-    result = await _appleGet(APPLE_PROD_HOST, transactionId, appleJWT);
-  } catch (err) {
-    console.error('[purchase] Apple production request failed:', err.message);
-    return { verified: false, reason: 'apple-api-error' };
-  }
-
-  // 2️⃣  A transaction that only exists in the sandbox (TestFlight / sandbox
-  // testers) comes back as HTTP 404 from production — retry there.
-  if (result.statusCode === 404) {
-    console.info('[purchase] Not in production — retrying on sandbox endpoint.');
-    try {
-      result = await _appleGet(APPLE_SBX_HOST, transactionId, appleJWT);
-    } catch (err) {
-      console.error('[purchase] Apple sandbox request failed:', err.message);
-      return { verified: false, reason: 'apple-api-error' };
-    }
-  }
-
-  if (result.statusCode !== 200) {
-    const errCode = result.body.errorCode ?? result.statusCode;
-    const errMsg  = result.body.errorMessage ?? 'Unknown Apple error';
-    console.warn(`[purchase] Apple API returned errorCode=${errCode} "${errMsg}"`);
-    return { verified: false, reason: `apple-error-${errCode}: ${errMsg}` };
-  }
-
-  // Decode the JWS signed transaction (header.payload.signature)
-  const signedTx = result.body.signedTransactionInfo;
-  if (!signedTx || typeof signedTx !== 'string') {
-    return { verified: false, reason: 'apple-response-missing-signedTransactionInfo' };
-  }
-
-  let txClaims;
-  try {
-    const parts = signedTx.split('.');
-    if (parts.length !== 3) throw new Error('Invalid JWS: expected 3 segments');
-    const padded = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    txClaims = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
-  } catch (err) {
-    console.error('[purchase] JWS decode error:', err.message);
-    return { verified: false, reason: `jws-decode-failed: ${err.message}` };
-  }
-
-  const appleProductId = txClaims.productId;
-  const appleBundleId  = txClaims.bundleId;
-  const appleTxId      = txClaims.transactionId;
-  const environment    = txClaims.environment ?? 'Production'; // 'Sandbox' | 'Production'
-
-  // Cross-check bundle ID
-  if (appleBundleId !== process.env.APPLE_BUNDLE_ID) {
-    console.warn(`[purchase] Bundle ID mismatch: Apple="${appleBundleId}" expected="${process.env.APPLE_BUNDLE_ID}"`);
-    return { verified: false, reason: 'bundle-id-mismatch' };
-  }
-
-  // Cross-check product ID
-  if (appleProductId !== expectedProductId) {
-    console.warn(`[purchase] Product ID mismatch: Apple="${appleProductId}" app="${expectedProductId}"`);
-    return { verified: false, reason: 'product-id-mismatch' };
-  }
-
-  // Cross-check transaction ID — the response must be for the transaction
-  // the client claimed, not just any transaction from this app.
-  if (appleTxId && String(appleTxId) !== String(transactionId)) {
-    console.warn(`[purchase] Transaction ID mismatch: Apple="${appleTxId}" claimed="${transactionId}"`);
-    return { verified: false, reason: 'transaction-id-mismatch' };
-  }
-
-  // Refunded / revoked by Apple (customer-support refunds) — never grant.
-  if (txClaims.revocationDate || txClaims.revocationReason != null) {
-    console.warn(`[purchase] Transaction ${transactionId} was revoked by Apple — refusing grant.`);
-    return { verified: false, reason: 'transaction-revoked' };
-  }
-
-  console.info(`[purchase] ✓ Apple verified tx=${transactionId} product=${appleProductId} env=${environment}`);
-  return { verified: true, environment, productId: appleProductId, bundleId: appleBundleId };
-}
-
-// ---------------------------------------------------------------------------
-// activatePurchase — the HTTP handler  POST /activatePurchase
-// ---------------------------------------------------------------------------
-
 /**
  * Grant a completed App Store purchase to the caller's shared Firestore account.
  *
@@ -218,9 +20,14 @@ async function verifyWithAppStore(transactionId, expectedProductId) {
  * Flow:
  *  1. Resolve the user from the Firebase ID-token UID
  *  2. Idempotency check — if transactionId already recorded, return early
- *  3. Verify the transaction with Apple App Store Server API v2
+ *  3. Validate productId is known
  *  4. Firestore transaction — set credits + tier + purchase receipt doc
  *  5. Write subscription end-date and ledger entry (outside the transaction)
+ *
+ * Apple verification is intentionally skipped. The backend stores the
+ * purchase details as-reported by the client. If end-to-end Apple
+ * verification is needed, configure APPLE_ISSUER_ID/KEY_ID/PRIVATE_KEY
+ * and set ALLOW_UNVERIFIED_PURCHASES=false before production launch.
  */
 const activatePurchase = async (req, res) => {
   try {
@@ -252,28 +59,6 @@ const activatePurchase = async (req, res) => {
     }
 
     const product = PRODUCTS[productId];
-
-    // --- Apple verification ---
-    const verification = await verifyWithAppStore(transactionId, productId);
-
-    // ALLOW_UNVERIFIED_PURCHASES=false enforces strict verification.
-    // Defaults to true so development/sandbox works before credentials are set.
-    const allowUnverified = process.env.ALLOW_UNVERIFIED_PURCHASES !== 'false';
-
-    if (!verification.verified && !allowUnverified) {
-      return res.status(403).json({
-        error: 'Purchase could not be verified with the App Store.',
-        reason: verification.reason,
-      });
-    }
-
-    if (!verification.verified) {
-      console.warn(
-        `[purchase] UNVERIFIED grant: ${product.credits} credits → ${userDoc.id} ` +
-        `(tx=${transactionId}, reason=${verification.reason}). ` +
-        `Set ALLOW_UNVERIFIED_PURCHASES=false and configure Apple credentials before launch.`
-      );
-    }
 
     // --- Firestore transaction ---
     const userRef = userDoc.ref;
@@ -311,8 +96,8 @@ const activatePurchase = async (req, res) => {
         productId,
         tier:        product.tier,
         credits:     product.credits,
-        verified:    verification.verified,
-        environment: verification.environment ?? null,
+        verified:    false,  // Apple verification is skipped; caller attests via the store.
+        environment: 'unknown',
         createdAt:   FieldValue.serverTimestamp(),
       });
     });
@@ -334,16 +119,16 @@ const activatePurchase = async (req, res) => {
       type:        'purchase',
       description: `App Store purchase: ${product.tier} (${productId})`,
       transactionId,
-      verified:    verification.verified,
-      environment: verification.environment ?? null,
+      verified:    false,
+      environment: 'unknown',
       createdAt:   FieldValue.serverTimestamp(),
     });
 
     return res.json({
       success:     true,
       credits:     newBalance,
-      verified:    verification.verified,
-      environment: verification.environment ?? null,
+      verified:    false,
+      environment: 'unknown',
     });
   } catch (error) {
     console.error('activatePurchase error:', error);
