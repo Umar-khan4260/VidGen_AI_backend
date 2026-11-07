@@ -6,6 +6,7 @@ const userController = require('../controllers/user.controller');
 const generationController = require('../controllers/generation.controller');
 const chatController = require('../controllers/chat.controller');
 const purchaseController = require('../controllers/purchase.controller');
+const modelsController = require('../controllers/models.controller');
 
 const router = express.Router();
 
@@ -31,5 +32,9 @@ router.post('/upload', verifyFirebaseAuth, upload.single('file'), chatController
 
 // Purchases — credits App Store transactions to the Firestore balance.
 router.post('/activatePurchase', verifyFirebaseAuth, purchaseController.activatePurchase);
+
+// Public, read-only model availability list used by the client to hide models
+// disabled by an admin. Enforcement itself happens server-side per request.
+router.get('/models', modelsController.getModels);
 
 module.exports = router;

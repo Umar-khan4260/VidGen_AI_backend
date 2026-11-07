@@ -1,5 +1,6 @@
 const ChatService = require('../services/chat.service');
 const userService = require('../services/user.service');
+const modelPolicy = require('../services/model-policy.service');
 const { StringDecoder } = require('string_decoder');
 
 // How long we keep draining an upstream chat stream after the client has
@@ -58,6 +59,12 @@ const chatCompletion = async (req, res) => {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     if (!endpoint) return res.status(400).json({ error: 'endpoint is required' });
 
+    // Admin availability policy (chat model id lives on the payload, with the
+    // endpoint path as a fallback for payloads like GPT-5.2 that omit it).
+    await modelPolicy.assertModelEnabled(
+      modelPolicy.resolveModelId(payload && payload.model, endpoint)
+    );
+
     await userService.assertCanSpend(userId);
 
     const service = initService(req.app.locals.kieApiKey);
@@ -86,6 +93,9 @@ const chatStream = async (req, res) => {
   if (!endpoint) return res.status(400).json({ error: 'endpoint is required' });
 
   try {
+    await modelPolicy.assertModelEnabled(
+      modelPolicy.resolveModelId(payload && payload.model, endpoint)
+    );
     await userService.assertCanSpend(userId);
   } catch (error) {
     return res.status(getStatusCode(error.code)).json({ error: error.message, code: error.code });

@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { db, FieldValue } = require('../config/firebase');
 const pricing = require('./pricing.service');
+const modelPolicy = require('./model-policy.service');
 
 const KIE_BASE_URL = 'https://api.kie.ai';
 const KIE_DOWNLOAD_URL_PATH = '/api/v1/common/download-url';
@@ -284,6 +285,10 @@ class GenerationService {
       err.code = 'invalid-argument';
       throw err;
     }
+
+    // Admin availability policy — reject models disabled in the admin panel
+    // before any balance check or KIE call.
+    await modelPolicy.assertModelEnabled(model);
 
     const kind = pricing.getModelKind(model);
     const floor = pricing.getFloor(kind);
