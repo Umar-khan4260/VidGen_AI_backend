@@ -1,25 +1,60 @@
-﻿# VidGen AI backend — local/Docker stack
-# NOTE: the top-level `version:` key is obsolete in Docker Compose v2 and is omitted.
+﻿# VidGen AI backend — Docker Compose (single configuration file)
+#
+# No Dockerfile is used: everything is defined here.
+#   - Base image: node:20-alpine
+#   - App code is mounted from ./functions (dev-friendly, no rebuild needed)
+#   - Port is read from backend/.env via ${PORT:-8080}
+#   - Secrets (.env, service-account-key.json) are injected at runtime,
+#     never baked into an image.
+#
+# Usage:
+#   cp .env.example .env        # edit .env with real values
+#   docker compose up -d
 
 services:
   app:
-    build:
-      context: .          # Build context is the root so the Dockerfile can COPY functions/
-      dockerfile: Dockerfile
+    image: node:20-alpine
+    container_name: vidgen-ai-backend
+    init: true
+    restart: unless-stopped
+
+    # Port: host:container, both read from .env (PORT=8080 by default)
     ports:
-      - "8080:8080"
-    # Load KIE_API_KEY (and anything else) from backend/.env at runtime.
-    # `required: false` keeps the stack startable before .env is created.
+      - "${PORT:-8080}:${PORT:-8080}"
+
+    # Load all variables from backend/.env at runtime.
     env_file:
       - path: .env
         required: false
+
+    # Docker-specific overrides (PORT comes from .env via interpolation).
     environment:
       - NODE_ENV=production
-      - PORT=8080
-      # Overrides the host path that may live in .env; inside the container the
-      # service-account key is mounted at this path below.
+      - PORT=${PORT:-8080}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account-key.json
+
     volumes:
-      - ./functions/src:/app/src                              # hot-reload src in dev
-      - ./service-account-key.json:/app/service-account-key.json:ro  # Firebase Admin creds (read-only)
-      - /app/node_modules                                     # keep container node_modules untouched
+      # Mount the functions folder so code changes are picked up without rebuild.
+      - ./functions:/app
+      # Firebase Admin service-account key (read-only).
+      - ./service-account-key.json:/app/service-account-key.json:ro
+      # Keep container node_modules untouched by host mounts.
+      - /app/node_modules
+
+    # Install production deps then start the Express server.
+    command: >
+      sh -c "npm ci --omit=dev --no-audit --no-fund && node src/server.js"
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider",
+             "http://127.0.0.1:${PORT:-8080}/api/models"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+    networks:
+      - vidgen-backend
+
+networks:
+  vidgen-backend:
+    driver: bridge
