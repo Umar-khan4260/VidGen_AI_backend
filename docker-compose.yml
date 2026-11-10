@@ -1,4 +1,4 @@
-﻿# VidGen AI backend — Docker Compose (single configuration file)
+# VidGen AI backend — Docker Compose (single configuration file)
 #
 # No Dockerfile is used: everything is defined here.
 #   - Base image: node:20-alpine
@@ -8,7 +8,7 @@
 #     never baked into an image.
 #
 # Usage:
-#   cp .env.example .env        # edit .env with real values
+#   nano .env                   # create and fill .env with secrets
 #   docker compose up -d
 
 services:

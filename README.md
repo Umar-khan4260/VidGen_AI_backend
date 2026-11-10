@@ -39,7 +39,6 @@ VidGen_AI_backend/
 │   └── package.json
 ├── deploy/
 │   └── nginx.conf.example    # Nginx reverse-proxy config template
-├── .env.example              # ← copy this to .env and fill values
 ├── .env                      # ← your real secrets (gitignored, never commit)
 ├── service-account-key.json  # ← Firebase service account key (gitignored)
 ├── docker-compose.yml
@@ -71,17 +70,7 @@ cd VidGen_AI_backend
 
 ## 2. Set Up Environment Variables
 
-Copy the example file and fill in real values:
-
-```bash
-# Linux / macOS
-cp .env.example .env
-
-# Windows (PowerShell)
-Copy-Item .env.example .env
-```
-
-Open `.env` and set the following:
+Create a `.env` file in the repo root and fill in real values:
 
 ```env
 # KIE.ai platform API key
