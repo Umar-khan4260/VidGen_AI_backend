@@ -15,6 +15,7 @@ services:
   app:
     image: node:20-alpine
     container_name: vidgen-ai-backend
+    working_dir: /app
     init: true
     restart: unless-stopped
 
@@ -44,7 +45,7 @@ services:
     # Install production deps then start the Express server.
     # Uses npm install (not npm ci) so it works even if package-lock.json is missing.
     command: >
-      sh -c "npm install --omit=dev --no-audit --no-fund && node src/server.js"
+      sh -c "cd /app && npm install --omit=dev --no-audit --no-fund && node src/server.js"
 
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider",
